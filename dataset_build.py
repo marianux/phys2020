@@ -194,26 +194,29 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         # load QRS detections
         mat_struct = sio.loadmat( os.path.join( qrs_det_path, this_rec_name + '_QRS_detections.mat' ) )
 
-        ecg_one_lead = mat_struct['ecg_lead']
-        ecg_one_lead = ecg_one_lead.flatten(1)
+        qrs_locs = np.vstack(mat_struct['mixartif_ECGmix1']['time'][0]).flatten()
 
 
-
+        rec_sz = ecg_header['sig_len']
+        half_rec = my_int(rec_sz/2)-500
+        win_sz = 1000
+        gap_sz = 100
+        start_idx = np.array([0, half_rec, rec_sz-win_sz])
+        face_colors = [(0.7, 0.2, 0.2, 0.3), (0.2, 0.2, 0.7, 0.3), (0.2, 0.7, 0.2, 0.3)]
+        xaxis_idx = start_idx
+        xaxis_idx[1:] = xaxis_idx[1:] + gap_sz
         plt.figure(1);
         plt.clf()
-        half_rec = my_int(ecg_header['sig_len']/2)-500
-        plt.plot( np.vstack([data[0:1000,:], data[ half_rec:half_rec+1000,:], data[ -1000:,:] ]) )
+        
+        [ plt.plot( np.arange(xaxis_idx[ii], xaxis_idx[ii]+win_sz), data[start_idx[ii]:start_idx[ii]+win_sz,:] )  for ii in range(len(start_idx)) ]
         
         ax = plt.gca()
         x_lim = ax.get_xlim()
         y_lim = ax.get_ylim()
-        
-        rect = patches.Rectangle((0, y_lim[0]), 1000, y_lim[1] - y_lim[0], linewidth=1,edgecolor='r',facecolor=(0.7, 0.2, 0.2, 0.3))
-        ax.add_patch(rect)
-        rect = patches.Rectangle((1000, y_lim[0]), 1000, y_lim[1] - y_lim[0], linewidth=1,edgecolor='b',facecolor=(0.2, 0.2, 0.7, 0.3))
-        ax.add_patch(rect)
-        rect = patches.Rectangle((2000, y_lim[0]), 1000, y_lim[1] - y_lim[0], linewidth=1,edgecolor='g',facecolor=(0.2, 0.7, 0.2, 0.3))
-        ax.add_patch(rect)
+
+        for ii in range(len(start_idx)):
+            rect = patches.Rectangle((xaxis_idx[ii], y_lim[0]), xaxis_idx[ii]+win_sz, y_lim[1] - y_lim[0], linewidth=1, edgecolor='k',facecolor=face_colors[ii])
+            ax.add_patch(rect)
 
         plt.title( this_rec_name + '- Dx: ' + this_df['Dx'].item() )
         plt.savefig( os.path.join( image_path, this_rec_name + '.jpg'), dpi=150)
