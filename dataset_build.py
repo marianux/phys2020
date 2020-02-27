@@ -126,11 +126,6 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
     if len(leads_x_rec) == 0:
         leads_x_rec = ['all'] * len(records) 
        
-    start_beat_idx = 0
-#    start_beat_idx = ((np.array(records) == 'stdb/315').nonzero())[0][0]
-#    start_beat_idx = ((np.array(records) == 'ltafdb/20').nonzero())[0][0]
-#        start_beat_idx = ((np.array(records) == 'edb/e0204').nonzero())[0][0]
-#        start_beat_idx = ((np.array(records) == 'sddb/49').nonzero())[0][0]
     
     all_signals = []
     all_extrema = []
@@ -156,12 +151,14 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
     df_empty = pd.DataFrame([], columns= target_columns + target_classes )
     df_all = df_empty
 
+    start_beat_idx = 0
+
 #    for this_rec in records:
     for ii in np.arange(start_beat_idx, len(records)):
 
         this_rec = records[ii]
         
-        print ( str(my_int(ii / len(records) * 100)) + '% Procesando:' + this_rec)
+        print ( str(ii) + ' - ' + str(my_int(ii / len(records) * 100)) + '% Procesando:' + this_rec)
         
         data, ecg_header = wf.rdsamp(os.path.join(data_path, this_rec) )
 
@@ -200,26 +197,58 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         rec_sz = ecg_header['sig_len']
         half_rec = my_int(rec_sz/2)-500
         win_sz = 1000
-        gap_sz = 100
+        gap_sz = 50
         start_idx = np.array([0, half_rec, rec_sz-win_sz])
         face_colors = [(0.7, 0.2, 0.2, 0.3), (0.2, 0.2, 0.7, 0.3), (0.2, 0.7, 0.2, 0.3)]
-        xaxis_idx = start_idx
-        xaxis_idx[1:] = xaxis_idx[1:] + gap_sz
+        xaxis_idx = np.arange(0, len(start_idx)) * win_sz
+        xgap = gap_sz * np.arange(0,len(xaxis_idx))
         plt.figure(1);
         plt.clf()
         
-        [ plt.plot( np.arange(xaxis_idx[ii], xaxis_idx[ii]+win_sz), data[start_idx[ii]:start_idx[ii]+win_sz,:] )  for ii in range(len(start_idx)) ]
+        [ plt.plot( np.arange(xaxis_idx[ii], xaxis_idx[ii]+win_sz) + xgap[ii], data[start_idx[ii]:start_idx[ii]+win_sz,:] )  for ii in range(len(start_idx)) ]
         
         ax = plt.gca()
         x_lim = ax.get_xlim()
         y_lim = ax.get_ylim()
 
         for ii in range(len(start_idx)):
-            rect = patches.Rectangle((xaxis_idx[ii], y_lim[0]), xaxis_idx[ii]+win_sz, y_lim[1] - y_lim[0], linewidth=1, edgecolor='k',facecolor=face_colors[ii])
-            ax.add_patch(rect)
+            
+            this_locs = qrs_locs[ np.logical_and( qrs_locs > start_idx[ii], qrs_locs < (start_idx[ii]+win_sz)) ] - start_idx[ii] + xaxis_idx[ii] + xgap[ii]
+            if len(this_locs) > 0:
+                plt.plot( [this_locs] * 2, np.array([y_lim] * len(this_locs)).transpose(), 'v:k' ) 
+                
+                rect = patches.Rectangle((xaxis_idx[ii]+ xgap[ii], y_lim[0]), win_sz, y_lim[1] - y_lim[0], linewidth=1, edgecolor='k',facecolor=face_colors[ii])
+                ax.add_patch(rect)
 
         plt.title( this_rec_name + '- Dx: ' + this_df['Dx'].item() )
+        
         plt.savefig( os.path.join( image_path, this_rec_name + '.jpg'), dpi=150)
+
+        pre_win = my_int( ecg_header['fs'] * 0.3 )
+        post_win = my_int( ecg_header['fs'] * 0.5 )
+        
+        target_lead_names =  ['II', 'V1']
+    
+        [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
+        
+        
+        for jj in target_lead_idx:
+            plt.figure(1);
+            plt.clf()
+            
+            qrs_locs = qrs_locs[ np.logical_and(qrs_locs > pre_win, qrs_locs < (rec_sz - post_win) ) ]
+            
+            sync_beats = np.array([ data[ ii-pre_win:ii+post_win, jj] - np.median(data[ ii-pre_win:ii+post_win, jj])  for ii in qrs_locs ]).transpose()
+            sb_bar = np.median(sync_beats, axis=1, keepdims=True)
+            sb_mad = np.median( np.abs(sync_beats - sb_bar) )
+            
+            plt.plot( sync_beats )
+    
+            str_mad = '{:f}'.format(sb_mad)
+            plt.title( this_rec_name + '- Dx: ' + this_df['Dx'].item() + ' - mad: ' + str_mad )
+    
+            plt.savefig( os.path.join( image_path, str_mad + this_rec_name + '_sync' + ecg_header['sig_name'][jj] + '.jpg'), dpi=150)
+
 
     #     all_signals += [data]
     #     all_extrema += [rel_extrema]
