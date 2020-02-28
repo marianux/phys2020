@@ -152,6 +152,13 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
     df_all = df_empty
 
     start_beat_idx = 0
+    
+    
+    img_format = 'pdf'
+    
+    if ds_config['DoFigs']:
+        fig = plt.figure(1, figsize=(11.69,8.27) );
+    
 
 #    for this_rec in records:
     for ii in np.arange(start_beat_idx, len(records)):
@@ -194,61 +201,96 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         qrs_locs = np.vstack(mat_struct['mixartif_ECGmix1']['time'][0]).flatten()
 
 
-        rec_sz = ecg_header['sig_len']
-        half_rec = my_int(rec_sz/2)-500
-        win_sz = 1000
-        gap_sz = 50
-        start_idx = np.array([0, half_rec, rec_sz-win_sz])
-        face_colors = [(0.7, 0.2, 0.2, 0.3), (0.2, 0.2, 0.7, 0.3), (0.2, 0.7, 0.2, 0.3)]
-        xaxis_idx = np.arange(0, len(start_idx)) * win_sz
-        xgap = gap_sz * np.arange(0,len(xaxis_idx))
-        plt.figure(1);
-        plt.clf()
-        
-        [ plt.plot( np.arange(xaxis_idx[ii], xaxis_idx[ii]+win_sz) + xgap[ii], data[start_idx[ii]:start_idx[ii]+win_sz,:] )  for ii in range(len(start_idx)) ]
-        
-        ax = plt.gca()
-        x_lim = ax.get_xlim()
-        y_lim = ax.get_ylim()
+        if ds_config['DoFigs']:
 
-        for ii in range(len(start_idx)):
+            rec_sz = ecg_header['sig_len']
+            half_rec = my_int(rec_sz/2)-500
+            win_sz = 1000
+            gap_sz = 50
+            start_idx = np.array([0, half_rec, rec_sz-win_sz])
+            face_colors = [(0.7, 0.2, 0.2, 0.3), (0.2, 0.2, 0.7, 0.3), (0.2, 0.7, 0.2, 0.3)]
+            xaxis_idx = np.arange(0, len(start_idx)) * win_sz
+            xgap = gap_sz * np.arange(0,len(xaxis_idx))
+            fig.clf()
             
-            this_locs = qrs_locs[ np.logical_and( qrs_locs > start_idx[ii], qrs_locs < (start_idx[ii]+win_sz)) ] - start_idx[ii] + xaxis_idx[ii] + xgap[ii]
-            if len(this_locs) > 0:
-                plt.plot( [this_locs] * 2, np.array([y_lim] * len(this_locs)).transpose(), 'v:k' ) 
+            [ plt.plot( np.arange(xaxis_idx[ii], xaxis_idx[ii]+win_sz) + xgap[ii], data[start_idx[ii]:start_idx[ii]+win_sz,:] )  for ii in range(len(start_idx)) ]
+            
+            ax = plt.gca()
+            x_lim = ax.get_xlim()
+            y_lim = ax.get_ylim()
+    
+            for ii in range(len(start_idx)):
                 
-                rect = patches.Rectangle((xaxis_idx[ii]+ xgap[ii], y_lim[0]), win_sz, y_lim[1] - y_lim[0], linewidth=1, edgecolor='k',facecolor=face_colors[ii])
-                ax.add_patch(rect)
-
-        plt.title( this_rec_name + '- Dx: ' + this_df['Dx'].item() )
-        
-        plt.savefig( os.path.join( image_path, this_rec_name + '.jpg'), dpi=150)
-
-        pre_win = my_int( ecg_header['fs'] * 0.3 )
-        post_win = my_int( ecg_header['fs'] * 0.5 )
-        
-        target_lead_names =  ['II', 'V1']
+                this_locs = qrs_locs[ np.logical_and( qrs_locs > start_idx[ii], qrs_locs < (start_idx[ii]+win_sz)) ] - start_idx[ii] + xaxis_idx[ii] + xgap[ii]
+                if len(this_locs) > 0:
+                    plt.plot( [this_locs] * 2, np.array([y_lim] * len(this_locs)).transpose(), 'v:k' ) 
+                    
+                    rect = patches.Rectangle((xaxis_idx[ii]+ xgap[ii], y_lim[0]), win_sz, y_lim[1] - y_lim[0], linewidth=1, edgecolor='k',facecolor=face_colors[ii])
+                    ax.add_patch(rect)
     
-        [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
+            plt.title( this_rec_name + '- Dx: ' + this_df['Dx'].item() )
+    
+            this_rec_path = os.path.join( image_path, this_rec_name )
+            os.makedirs( this_rec_path, exist_ok=True)
+            
+            plt.savefig( os.path.join( this_rec_path, this_rec_name + '.' + img_format), papertype = 'A4')
+    
+    
+    
+            pre_win = my_int( ecg_header['fs'] * 0.3 )
+            post_win = my_int( ecg_header['fs'] * 0.5 )
+            
+            target_lead_names =  ['I', 'II', 'V2', 'V3', 'V4', 'V5']
+        
+            [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
+            
+    
+            fig.clf()
+            axs = fig.subplots(2, 3, sharex='col', sharey='row',
+                                    gridspec_kw={'hspace': 0, 'wspace': 0})
+            
+            for (jj, this_ax) in zip(target_lead_idx, axs.flat):
+                
+                qrs_locs = qrs_locs[ np.logical_and(qrs_locs > pre_win, qrs_locs < (rec_sz - post_win) ) ]
+                
+                sync_beats = np.array([ data[ ii-pre_win:ii+post_win, jj] - np.median(data[ ii-pre_win:ii+post_win, jj])  for ii in qrs_locs ]).transpose()
+                sb_bar = np.median(sync_beats, axis=1, keepdims=True)
+                sb_mad = np.median( np.abs(sync_beats - sb_bar) )
+                
+                this_ax.plot( sync_beats )
+                this_ax.text(0.05, 0.92, ecg_header['sig_name'][jj], style='italic',
+                        bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 6}, transform=this_ax.transAxes)
         
         
-        for jj in target_lead_idx:
-            plt.figure(1);
-            plt.clf()
+                str_mad = '{:f}'.format(sb_mad)
+        
+            # Major ticks every 20, minor ticks every 5
+            major_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.1, dtype='int' )
+            minor_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.02, dtype='int' )
             
-            qrs_locs = qrs_locs[ np.logical_and(qrs_locs > pre_win, qrs_locs < (rec_sz - post_win) ) ]
-            
-            sync_beats = np.array([ data[ ii-pre_win:ii+post_win, jj] - np.median(data[ ii-pre_win:ii+post_win, jj])  for ii in qrs_locs ]).transpose()
-            sb_bar = np.median(sync_beats, axis=1, keepdims=True)
-            sb_mad = np.median( np.abs(sync_beats - sb_bar) )
-            
-            plt.plot( sync_beats )
+            major_ticks_lab = np.arange(-pre_win, post_win, ecg_header['fs'] * 0.1, dtype='int' )
+                
+            for this_ax in axs.flat:
+                this_ax.label_outer()
+                
+                this_ax.set_xticks( major_ticks )
+                this_ax.set_xticks( minor_ticks, minor=True)
     
-            str_mad = '{:f}'.format(sb_mad)
-            plt.title( this_rec_name + '- Dx: ' + this_df['Dx'].item() + ' - mad: ' + str_mad )
+                # this_ax.set_xticklabels( [str(atick) for atick in major_ticks_lab] )
+                this_ax.set_xticklabels( major_ticks_lab )
     
-            plt.savefig( os.path.join( image_path, str_mad + this_rec_name + '_sync' + ecg_header['sig_name'][jj] + '.jpg'), dpi=150)
-
+                # And a corresponding grid
+                this_ax.grid(which='x')
+                
+                # Or if you want different settings for the grids:
+                this_ax.grid(which='minor', alpha=0.2)
+                this_ax.grid(which='major', alpha=0.5)
+                
+    
+            plt.suptitle( this_rec_name + '- Dx: ' + this_df['Dx'].item() )
+    
+            fig.savefig( os.path.join( this_rec_path, this_rec_name + '_insync.' + img_format), papertype = 'A4')
+        
 
     #     all_signals += [data]
     #     all_extrema += [rel_extrema]
@@ -341,6 +383,10 @@ parser.add_argument( '--particion',
                      type=float, 
                      help='Cantidad de pacientes en el set de training-val-test')
 
+parser.add_argument( '--figs', 
+                     action='store_true',
+                     help='Crear figuras para depuracion')
+
 args = parser.parse_args()
 
 db_path = args.db_path
@@ -430,7 +476,9 @@ ds_config = {
                 
                 'train_filename': os.path.join(dataset_path, 'train_' + '_'.join(db_name) + '.npy'),
                 'test_filename':  os.path.join(dataset_path, 'test_' + '_'.join(db_name) + '.npy'),
-                'val_filename':   os.path.join(dataset_path, 'val_' + '_'.join(db_name) + '.npy')
+                'val_filename':   os.path.join(dataset_path, 'val_' + '_'.join(db_name) + '.npy'),
+                
+                'DoFigs': args.figs
              } 
 
 bForce_data_div = True
