@@ -6,3 +6,5 @@ ecg_kit_tmp_files/
 qrs_detections/
 
 *.m~
+
+*.pyc

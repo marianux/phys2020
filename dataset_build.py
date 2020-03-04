@@ -8,7 +8,6 @@ Created on Fri Feb 14 16:21:20 2020
 
 import numpy as np
 import sys
-from fractions import Fraction
 import pandas as pd
 import os
 from glob import glob
@@ -21,7 +20,11 @@ import argparse as ap
 import re
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import pdb
+
+
+from importlib import reload
+
+from qs_filter_design import qs_filter_design
 
 
 
@@ -116,7 +119,8 @@ def get_records( db_path, db_name ):
 
     return all_records, all_patient_list, size_db
 
-
+  
+        
 def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentation = 1, ds_name = 'none'):
 
 
@@ -160,6 +164,9 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         fig = plt.figure(1, figsize=(11.69,8.27) );
     
 
+    wt_filters = qs_filter_design( scales = np.arange(3,5), fs = ds_config['target_fs'] )
+
+
 #    for this_rec in records:
     for ii in np.arange(start_beat_idx, len(records)):
 
@@ -167,10 +174,15 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         
         print ( str(ii) + ' - ' + str(my_int(ii / len(records) * 100)) + '% Procesando:' + this_rec)
         
+        this_rec_name = this_rec.split('/')[1]
+        
         data, ecg_header = wf.rdsamp(os.path.join(data_path, this_rec) )
 
+        # load QRS detections
+        mat_struct = sio.loadmat( os.path.join( qrs_det_path, this_rec_name + '_QRS_detections.mat' ) )
+        qrs_locs = np.vstack(mat_struct['mixartif_ECGmix1']['time'][0]).flatten()
+
         # parse diagnostics
-        this_rec_name = this_rec.split('/')[1]
         parsed_comments = np.array([re.search('(.*)\:\ (.*)', aa).group(1, 2) for aa in ecg_header['comments'] ]).transpose()
         df_aux = pd.DataFrame( parsed_comments[1,:], index= parsed_comments[0,:], columns= [this_rec_name] ).T
         this_df = df_empty 
@@ -180,26 +192,62 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         # turn on boolean target classes
         this_df[present_diagnostic] = True
         
+        
+        ###########################
+        ### Feature calculation ###
+        ###########################
+        
+        # WT transform
+        wt_data =  np.dstack([np.roll(sig.lfilter( wt_filt, 1, data, axis = 0), -int(np.round((len(wt_filt)-1)/2)), axis=0) for wt_filt in wt_filters])
+
+        # wt_data =  np.dstack([data, wt_data]);
+
+        # wt_data = wt_data / np.linalg.norm(wt_data, 2, axis=0, keepdims=True)
+
+        # plt.plot(np.squeeze(wt_data[0:10000,2,:]))
+        # plt.pause(10)
+
+        # calclulo los extremos relativos de mi señal en base a la wt4
+        this_distance = my_int(0.1*ds_config['target_fs'])
+        # rel_extrema = my_find_extrema( np.squeeze(wt_data[:,:]), this_distance = this_distance )
+        # rel_extrema = my_find_extrema( np.squeeze(wt_data) )
+        rel_extrema = [ my_find_extrema( np.squeeze(wt_data[:,:, jj]) ) for jj in range(wt_data.shape[2])]
+
+        # half_distance = this_distance // 2
+        # rel_extrema_r = [ np.array([ kk-half_distance+np.argmax( np.abs(data[ np.max([0, kk-half_distance]):np.min([data.shape[0],kk+half_distance]), jj ]) ) for kk in rel_extrema[jj] ]) for jj in range(ecg_header['n_sig']) ]
+        # rel_extrema_r = [ np.unique(rel_extrema_r[jj]) for jj in range(ecg_header['n_sig']) ]
+
+
+        # plt.figure(1); t_range=(1, data.shape[0]); plt.clf(); jj = 1; plt.plot( np.arange(t_range[0], t_range[1]), np.squeeze(wt_data[int(t_range[0]):int(t_range[1]),jj,:])); this_peaks = rel_extrema[jj][ np.logical_and( rel_extrema[jj] > t_range[0],  rel_extrema[jj] < t_range[1] )]; plt.plot(this_peaks, wt_data[this_peaks,jj,0], 'bx' ); plt.plot(this_peaks, wt_data[this_peaks,jj,0], 'ro' );  plt.pause(10)
+        # plt.figure(1); t_range=(10e3, 20e3); plt.clf(); jj = 3; plt.plot( np.arange(t_range[0], t_range[1]), data[int(t_range[0]):int(t_range[1]),jj]); this_peaks = rel_extrema[jj][ np.logical_and( rel_extrema[jj] > t_range[0],  rel_extrema[jj] < t_range[1] )]; plt.plot(this_peaks, data[this_peaks,jj], 'bx' ); plt.plot(this_peaks, data[this_peaks,jj], 'ro' );  plt.pause(10)
+        
+        
+        pre_win = my_int( ecg_header['fs'] * 0.3 )
+        post_win = my_int( ecg_header['fs'] * 0.5 )
+        
+        target_lead_names =  ['II', 'V2', 'V5']
+        
+        [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
+        
+        this_data = data[:, target_lead_idx]
+        
+        this_data = np.hstack( [this_data, wt_data[:,target_lead_idx, 0]] )
+        this_data = np.hstack( [this_data, wt_data[:,target_lead_idx, 1]] )
+        
+        this_row_cols = (3, len(target_lead_idx))
+        this_win = (pre_win, post_win)
+        
+        plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = this_win, row_cols = this_row_cols )
+        
+        
         # construct a dataframe with target data
         df_all = df_all.append(this_df)
 
-        # pq_ratio = ds_config['target_fs']/ecg_header['fs']
-        # resample_frac = Fraction( pq_ratio ).limit_denominator(20)
-        # #recalculo el ratio real
-        # pq_ratio = resample_frac.numerator/ resample_frac.denominator
-        # data = sig.resample_poly(data, resample_frac.numerator, resample_frac.denominator )
-        # ecg_header['sig_len'] = data.shape[0]
-            
-        # data = median_baseline_removal( data, fs = ds_config['target_fs'])
-# x_st = 200000; x_off = 10000; plt.plot(data[x_st:x_st+x_off,:]); plt.show()
-        
-#        plt.figure(1); plt.plot(data); plt.plot([0, data.shape[0]], [k_conv, k_conv], 'r:'); plt.plot([0, data.shape[0]], [-k_conv, -k_conv], 'r:'); this_axes = plt.gca(); this_axes.set_ylim([-(2**15-1), 2**15-1]); plt.show(1);
 
-        # load QRS detections
-        mat_struct = sio.loadmat( os.path.join( qrs_det_path, this_rec_name + '_QRS_detections.mat' ) )
 
-        qrs_locs = np.vstack(mat_struct['mixartif_ECGmix1']['time'][0]).flatten()
-
+        ########################
+        ### Image generation ###
+        ########################
 
         if ds_config['DoFigs']:
 
@@ -236,56 +284,12 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
             plt.savefig( os.path.join( this_rec_path, this_rec_name + '.' + img_format), papertype = 'A4')
     
     
-    
             pre_win = my_int( ecg_header['fs'] * 0.3 )
             post_win = my_int( ecg_header['fs'] * 0.5 )
             
             target_lead_names =  ['I', 'II', 'V2', 'V3', 'V4', 'V5']
-        
-            [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
             
-    
-            fig.clf()
-            axs = fig.subplots(2, 3, sharex='col', sharey='row',
-                                    gridspec_kw={'hspace': 0, 'wspace': 0})
-            
-            for (jj, this_ax) in zip(target_lead_idx, axs.flat):
-                
-                qrs_locs = qrs_locs[ np.logical_and(qrs_locs > pre_win, qrs_locs < (rec_sz - post_win) ) ]
-                
-                sync_beats = np.array([ data[ ii-pre_win:ii+post_win, jj] - np.median(data[ ii-pre_win:ii+post_win, jj])  for ii in qrs_locs ]).transpose()
-                sb_bar = np.median(sync_beats, axis=1, keepdims=True)
-                sb_mad = np.median( np.abs(sync_beats - sb_bar) )
-                
-                this_ax.plot( sync_beats )
-                this_ax.text(0.05, 0.92, ecg_header['sig_name'][jj], style='italic',
-                        bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 6}, transform=this_ax.transAxes)
-        
-        
-                str_mad = '{:f}'.format(sb_mad)
-        
-            # Major ticks every 20, minor ticks every 5
-            major_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.1, dtype='int' )
-            minor_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.02, dtype='int' )
-            
-            major_ticks_lab = np.arange(-pre_win, post_win, ecg_header['fs'] * 0.1, dtype='int' )
-                
-            for this_ax in axs.flat:
-                this_ax.label_outer()
-                
-                this_ax.set_xticks( major_ticks )
-                this_ax.set_xticks( minor_ticks, minor=True)
-    
-                # this_ax.set_xticklabels( [str(atick) for atick in major_ticks_lab] )
-                this_ax.set_xticklabels( major_ticks_lab )
-    
-                # And a corresponding grid
-                this_ax.grid(which='x')
-                
-                # Or if you want different settings for the grids:
-                this_ax.grid(which='minor', alpha=0.2)
-                this_ax.grid(which='major', alpha=0.5)
-                
+            plot_ecg_mosaic(data, ecg_header = ecg_header, qrs_locations = qrs_locs, t_win = (pre_win, post_win), target_lead_names = target_lead_names  )
     
             plt.suptitle( this_rec_name + '- Dx: ' + this_df['Dx'].item() )
     
@@ -350,14 +354,6 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
 
     df_all.to_csv( os.path.join(ds_config['dataset_path'], ds_name + '_data.txt'), sep=',', header=True, index=True)
     np.save( os.path.join(ds_config['dataset_path'], ds_name + '_dataframe'),  {'df_phys2020_training' : df_all})
-
-def my_int(x):
-    
-    return int(np.round(x))
-
-def my_ceil(x):
-    
-    return int(np.ceil(x))
 
 
 ########################
@@ -454,7 +450,7 @@ os.makedirs(result_path, exist_ok=True)
 ds_config = { 
                 'width': 10, # s
                 
-                'target_fs':        200, # Hz
+                'target_fs':        500, # Hz
 
                 'heartbeat_width': .09, # (s) Width of the type of heartbeat to seek for
                 'distance':  .3, # (s) Minimum separation between consequtive QRS complexes
