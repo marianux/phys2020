@@ -26,6 +26,7 @@ from importlib import reload
 
 from qs_filter_design import qs_filter_design
 
+from my_module import my_int, my_ceil, my_find_extrema, plot_ecg_mosaic
 
 
 def get_records( db_path, db_name ):
@@ -164,7 +165,8 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         fig = plt.figure(1, figsize=(11.69,8.27) );
     
 
-    wt_filters = qs_filter_design( scales = np.arange(3,5), fs = ds_config['target_fs'] )
+    wt_scales = np.arange(3,5)
+    wt_filters = qs_filter_design( scales = wt_scales, fs = ds_config['target_fs'] )
 
 
 #    for this_rec in records:
@@ -211,7 +213,7 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         this_distance = my_int(0.1*ds_config['target_fs'])
         # rel_extrema = my_find_extrema( np.squeeze(wt_data[:,:]), this_distance = this_distance )
         # rel_extrema = my_find_extrema( np.squeeze(wt_data) )
-        rel_extrema = [ my_find_extrema( np.squeeze(wt_data[:,:, jj]) ) for jj in range(wt_data.shape[2])]
+        zero_crossings, extrema = [ my_find_extrema( np.squeeze(wt_data[:,:, jj]) ) for jj in range(wt_data.shape[2])]
 
         # half_distance = this_distance // 2
         # rel_extrema_r = [ np.array([ kk-half_distance+np.argmax( np.abs(data[ np.max([0, kk-half_distance]):np.min([data.shape[0],kk+half_distance]), jj ]) ) for kk in rel_extrema[jj] ]) for jj in range(ecg_header['n_sig']) ]
@@ -234,11 +236,16 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         this_data = np.hstack( [this_data, wt_data[:,target_lead_idx, 0]] )
         this_data = np.hstack( [this_data, wt_data[:,target_lead_idx, 1]] )
         
-        this_row_cols = (3, len(target_lead_idx))
-        this_win = (pre_win, post_win)
-        
-        plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = this_win, row_cols = this_row_cols )
-        
+        for jj in range(wt_data.shape[2]):
+            this_marks = [ zero_crossings[jj][ii] for ii in target_lead_idx ] * 3
+            this_fig = plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = (pre_win, post_win), row_cols =  (3, len(target_lead_idx)), marks = this_marks)
+            this_fig.suptitle( '{:s} ZC escala {:d}'.format(this_rec_name,  wt_scales[jj] ))
+
+        for jj in range(wt_data.shape[2]):
+            this_marks = [ extrema[jj][ii] for ii in target_lead_idx ] * 3
+            this_fig = plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = (pre_win, post_win), row_cols =  (3, len(target_lead_idx)), marks = this_marks)
+            this_fig.suptitle( '{:s} extremos escala {:d}'.format(this_rec_name,  wt_scales[jj] ))
+
         
         # construct a dataframe with target data
         df_all = df_all.append(this_df)

@@ -9,6 +9,7 @@ Created on Wed Mar  4 17:08:31 2020
 
 import numpy as np
 
+from scipy import signal as sig
 from numbers import Number
 import pdb
 
@@ -41,7 +42,7 @@ def if_not_empty(x):
     else:
         return(np.nan)
 
-def keep_local_extrema(x, peaks, zero_crossings, distance  = None):
+def keep_local_extrema(x, peaks, zero_crossings, distance  = None, filter_win = None):
 
     try:
 
@@ -58,18 +59,22 @@ def keep_local_extrema(x, peaks, zero_crossings, distance  = None):
     
         # hago un filtrado de ventana para intentar no perder extrremos 
         # al final remuevo las redundancias
-        extrema_keep = 7
+        extrema_keep = 10
+        
+        if isinstance(filter_win, type(None) ):
+            filter_win = 500 # 1 second assuming 500 Hz sampling rate
             
-        this_step = my_int(1*ds_config['target_fs'])
-        aux_idx = [ np.logical_and( jj <= zc, jj+this_step > zc).nonzero()  for jj in np.arange(0, x.shape[0], this_step//2) ]
+        aux_idx = [ np.logical_and( jj <= zc, jj+filter_win > zc).nonzero()  for jj in np.arange(0, x.shape[0], filter_win//2) ]
         aux_idx2 = [ np.argsort(local_extrema_weight[jj])[-extrema_keep:] for jj in aux_idx ]
     
         try:
             # pad to extrema_keep length
             aux_idx2 = [ np.concatenate( [jj, [jj[-1]]*(extrema_keep - len(jj))]).astype(np.int) for jj in aux_idx2 ]
-        except:
+        except Exception as ex:
+            print(ex)
             pdb.set_trace()
-        
+            raise(ex)
+    
         # try:
         #     aux_idx3 = [local_extrema_weight[jj] for jj in aux_idx2 ]
         #     zc_r, aux_idx4 = np.unique( np.vstack([ zc[jj[0][kk]] for (jj,kk) in zip(aux_idx,aux_idx2) ]), return_index=True )
@@ -78,22 +83,43 @@ def keep_local_extrema(x, peaks, zero_crossings, distance  = None):
         
         aux_idx3 = [local_extrema_weight[jj] for jj in aux_idx2 ]
         zc_r, aux_idx4 = np.unique( np.vstack([ zc[jj[0][kk]] for (jj,kk) in zip(aux_idx,aux_idx2) ]), return_index=True )
+        local_extrema_weight_r = np.vstack(aux_idx3).flatten()[aux_idx4]
+
+
+        aux_idx = [ np.logical_and( jj <= peaks, jj+filter_win > peaks).nonzero()  for jj in np.arange(0, x.shape[0], filter_win//2) ]
+        aux_idx2 = [ np.argsort(np.abs( if_not_empty(x[peaks[jj]] )))[-extrema_keep:] for jj in aux_idx ]
+
+        try:
+            # pad to extrema_keep length
+            aux_idx2 = [ np.concatenate( [jj, [jj[-1]]*(extrema_keep - len(jj))]).astype(np.int) for jj in aux_idx2 ]
+        except Exception as ex:
+            print(ex)
+            pdb.set_trace()
+            raise(ex)
+
+        peaks_r = np.unique( np.vstack([ peaks[jj[0][kk]] for (jj,kk) in zip(aux_idx,aux_idx2) ]))
     
-    except:
+    except Exception as ex:
+        print(ex)
         pdb.set_trace()
+        raise(ex)
 
 
 # plt.figure(2); t_range=(10e3, 20e3); plt.clf(); plt.plot( np.arange(t_range[0], t_range[1]), x[int(t_range[0]):int(t_range[1])]); this_peaks = zc_r[ np.logical_and( zc_r > t_range[0],  zc_r < t_range[1] )]; plt.plot(this_peaks, x[this_peaks], 'ro' );  plt.pause(10)
 
 
     # filtramos cruces por cero más próximos que "distance"
-    if distance is None:
-        local_extrema = zc_r
+    if isinstance(distance, type(None) ):
+        local_zc = zc_r
+        local_peaks = peaks_r
     else:
         keep = _select_by_peak_distance(zc_r, local_extrema_weight_r, distance)
-        local_extrema = zc_r[keep]
+        local_zc = zc_r[keep]
+        
+        keep = _select_by_peak_distance(peaks_r, np.abs(x[peaks_r]), distance)
+        local_peaks = peaks_r
 
-    return( local_extrema )
+    return( local_zc, local_peaks )
 
 def my_find_extrema( x, this_distance = None ):
 
@@ -105,14 +131,20 @@ def my_find_extrema( x, this_distance = None ):
     
         # a partir de los picos y cruces, me quedo con los cruces más importantes.
         my_extrema = [ keep_local_extrema(x[:,ii], np.sort( np.hstack([jj,kk])), ll, this_distance)  for (ii, jj, kk, ll) in zip(range(x.shape[1]), peaks_p, peaks_n, zeros ) ]
+        
+        my_zc = [ my_extrema[ii][0] for ii in range(x.shape[1]) ]
+        my_ex = [ my_extrema[ii][1] for ii in range(x.shape[1]) ]
     
-    except:
+        
+    except Exception as ex:
+        print(ex)
         pdb.set_trace()
+        raise(ex)
 
-    return(my_extrema)
+    return(my_zc, my_ex)
 
 
-def plot_ecg_mosaic( data,  qrs_locations = None, target_lead_names = None, ecg_header = None,  t_win = None, row_cols = None ):
+def plot_ecg_mosaic( data,  qrs_locations = None, target_lead_names = None, ecg_header = None,  t_win = None, row_cols = None, marks = None):
     """
     Plot a multichannel or multilead ECG signal in multiple panels. 
     Each channel can be synchronized to a qrs_location time reference. 
@@ -183,78 +215,100 @@ def plot_ecg_mosaic( data,  qrs_locations = None, target_lead_names = None, ecg_
         #Creating a new axes with specified dimensions and some kwargs
         plt.axes((left, bottom, width, height), facecolor='w')
     """
+    try:
+        if isinstance(ecg_header, type(None) ):
+            
+            ecg_header = {}
+            ecg_header['sig_len'] , ecg_header['n_sig'] = data.shape
+            ecg_header['sig_name'] = np.arange(ecg_header['n_sig'])
+            ecg_header['fs'] = 500
+            
+        if isinstance(target_lead_names, type(None) ):
+            # all signals default
+            target_lead_names = ecg_header['sig_name']
+            
+        if isinstance(t_win, Number):
+            pre_win, post_win = t_win 
+        else:
+            # all data length covered
+            pre_win = my_int( ecg_header['fs'] * 0.3 )
+            post_win = my_int( ecg_header['fs'] * 0.5 )
+        
+        if isinstance(row_cols, Number):
+            nrows, ncols = row_cols 
+        else:
+            # all data length covered
+            ncols = 3
+            nrows = my_ceil( ecg_header['n_sig'] / ncols )
     
-    if isinstance(ecg_header, type(None) ):
+        [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
         
-        ecg_header = {}
-        ecg_header['sig_len'] , ecg_header['n_sig'] = data.shape
-        ecg_header['sig_name'] = np.arange(ecg_header['n_sig'])
-        
-    if isinstance(target_lead_names, type(None) ):
-        # all signals default
-        target_lead_names = ecg_header['sig_name']
-        
-    if isinstance(t_win, Number):
-        pre_win, post_win = t_win 
-    else:
-        # all data length covered
-        pre_win = ecg_header['sig_len']
-        post_win = ecg_header['sig_len']
+        fig = plt.figure(figsize = [11.69, 8.27])
+        axs = fig.subplots(nrows, ncols, sharex='col', sharey='row',
+                                gridspec_kw={'hspace': 0, 'wspace': 0})
 
-    if isinstance(qrs_locations, type(None) ):
-        # no qrs provided, a simulated default location at rec start
-        qrs_locations = 0
+        if isinstance(qrs_locations, type(None) ):
+            # no qrs provided, a simulated default location at rec start
+            qrs_locations = 0
+        else:
+            qrs_locations = qrs_locations[ np.logical_and(qrs_locations > pre_win, qrs_locations < (ecg_header['sig_len'] - post_win) ) ]
+        
+        for (jj, this_ax) in zip(target_lead_idx, axs.flat):
+
+            # plot signals             
+            sync_beats = np.array([ data[ ii-pre_win:ii+post_win, jj] - np.median(data[ ii-pre_win:ii+post_win, jj])  for ii in qrs_locations ]).transpose()
+            
+            this_ax.plot( sync_beats )
+
+            if not isinstance(marks, type(None) ):
+                # plot marks if available
+                this_marks = np.array(marks[jj])
+                sync_marks = np.unique(np.hstack([ this_marks[ np.logical_and( this_marks > ii-pre_win, this_marks < ii+post_win)] - ii + pre_win for ii in qrs_locations ]))
+                    
+                if len(sync_marks) > 0:
+                    y_lim = this_ax.get_ylim()
+                    this_ax.plot( [sync_marks] * 2, np.array([y_lim] * len(sync_marks)).transpose(), 
+                             color='gray', marker='|', linestyle=':',
+                             linewidth=1, markersize=7 ) 
     
-    if isinstance(row_cols, Number):
-        nrows, ncols = row_cols 
-    else:
-        # all data length covered
-        ncols = 3
-        nrows = my_ceil( ecg_header['n_sig'] / ncols )
-
-    [_, target_lead_idx, _] = np.intersect1d(ecg_header['sig_name'], target_lead_names,  assume_unique=True, return_indices=True)
+            
+            this_ax.text(0.05, 0.92, ecg_header['sig_name'][jj], style='italic',
+                    bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 6}, transform=this_ax.transAxes)
     
-    fig = plt.figure()
-
-    axs = fig.subplots(nrows, ncols, sharex='col', sharey='row',
-                            gridspec_kw={'hspace': 0, 'wspace': 0})
+            # sb_bar = np.median(sync_beats, axis=1, keepdims=True)
+            # sb_mad = np.median( np.abs(sync_beats - sb_bar) )
+            # str_mad = '{:f}'.format(sb_mad)
     
-    for (jj, this_ax) in zip(target_lead_idx, axs.flat):
+        # Major ticks every 20, minor ticks every 5
+        major_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.1, dtype='int' )
+        minor_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.02, dtype='int' )
         
-        qrs_locations = qrs_locations[ np.logical_and(qrs_locations > pre_win, qrs_locations < (ecg_header['sig_len'] - post_win) ) ]
-        
-        sync_beats = np.array([ data[ ii-pre_win:ii+post_win, jj] - np.median(data[ ii-pre_win:ii+post_win, jj])  for ii in qrs_locations ]).transpose()
-        
-        this_ax.plot( sync_beats )
-        this_ax.text(0.05, 0.92, ecg_header['sig_name'][jj], style='italic',
-                bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 6}, transform=this_ax.transAxes)
-
-        # sb_bar = np.median(sync_beats, axis=1, keepdims=True)
-        # sb_mad = np.median( np.abs(sync_beats - sb_bar) )
-        # str_mad = '{:f}'.format(sb_mad)
-
-    # Major ticks every 20, minor ticks every 5
-    major_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.1, dtype='int' )
-    minor_ticks = np.arange(0, pre_win + post_win, ecg_header['fs'] * 0.02, dtype='int' )
+        major_ticks_lab = np.arange(-pre_win, post_win, ecg_header['fs'] * 0.1, dtype='int' )
+            
+        for this_ax in axs.flat:
+            this_ax.label_outer()
+            
+            this_ax.set_xticks( major_ticks )
+            this_ax.set_xticks( minor_ticks, minor=True)
     
-    major_ticks_lab = np.arange(-pre_win, post_win, ecg_header['fs'] * 0.1, dtype='int' )
-        
-    for this_ax in axs.flat:
-        this_ax.label_outer()
-        
-        this_ax.set_xticks( major_ticks )
-        this_ax.set_xticks( minor_ticks, minor=True)
-
-        # this_ax.set_xticklabels( [str(atick) for atick in major_ticks_lab] )
-        this_ax.set_xticklabels( major_ticks_lab )
-
-        # And a corresponding grid
-        this_ax.grid(which='x')
-        
-        # Or if you want different settings for the grids:
-        this_ax.grid(which='minor', alpha=0.2)
-        this_ax.grid(which='major', alpha=0.5)
-        
-    return(axs)
+            # this_ax.set_xticklabels( [str(atick) for atick in major_ticks_lab] )
+            this_ax.set_xticklabels( major_ticks_lab )
     
-  
+            # And a corresponding grid
+            this_ax.grid(which='x')
+            
+            # Or if you want different settings for the grids:
+            this_ax.grid(which='minor', alpha=0.2)
+            this_ax.grid(which='major', alpha=0.5)
+
+    except Exception as ex:
+        print(ex)
+        pdb.set_trace()
+        raise(ex)
+        
+    return(fig)
+    
+
+# if __name__ == '__main__':
+    # por si hubiera que inicializar algo
+    
