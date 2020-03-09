@@ -144,6 +144,41 @@ def my_find_extrema( x, this_distance = None ):
     return(my_zc, my_ex)
 
 
+def sync_marks(sync_seq, the_marks, t_win ):
+    
+    synced_marks = np.array([])
+    
+    if  np.all([isinstance(ii, Number) for ii in t_win]):
+        pre_win, post_win = t_win
+    else:
+        pre_win = 1000
+        post_win = 1000
+        
+    the_marks = np.array(the_marks)
+    grouped_mark_idx = [ np.logical_and( the_marks > ii-pre_win, the_marks < ii+post_win).nonzero() for ii in sync_seq ]
+    grouped_mark = np.hstack([ the_marks[this_mark_idx] - ii + pre_win for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
+    mark_dist = np.hstack([ np.abs(the_marks[this_mark_idx] - ii) for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
+    grouped_mark_idx = np.hstack(grouped_mark_idx).flatten()
+    
+    aux_idx = np.argsort(grouped_mark_idx)
+    grouped_mark_idx = grouped_mark_idx[aux_idx]
+    mark_dist = mark_dist[aux_idx]
+    grouped_mark = grouped_mark[aux_idx]
+    
+    for ii in np.array(np.diff(grouped_mark_idx) == 0).nonzero():
+    
+        aux_idx = (grouped_mark_idx == grouped_mark_idx[ii]).nonzero()
+        
+        aux_idx2 = np.argsort(mark_dist[aux_idx])
+        
+        grouped_mark[ aux_idx[aux_idx2[1:]]] = np.nan
+        
+    grouped_mark = grouped_mark[np.bitwise_not(np.isnan(grouped_mark))]
+        
+    
+    return(synced_marks)
+
+
 def plot_ecg_mosaic( data,  qrs_locations = None, target_lead_names = None, ecg_header = None,  t_win = None, row_cols = None, marks = None):
     """
     Plot a multichannel or multilead ECG signal in multiple panels. 
@@ -227,14 +262,14 @@ def plot_ecg_mosaic( data,  qrs_locations = None, target_lead_names = None, ecg_
             # all signals default
             target_lead_names = ecg_header['sig_name']
             
-        if isinstance(t_win, Number):
+        if  np.all([isinstance(ii, Number) for ii in t_win]):
             pre_win, post_win = t_win 
         else:
             # all data length covered
             pre_win = my_int( ecg_header['fs'] * 0.3 )
             post_win = my_int( ecg_header['fs'] * 0.5 )
         
-        if isinstance(row_cols, Number):
+        if  np.all([isinstance(ii, Number) for ii in row_cols]):
             nrows, ncols = row_cols 
         else:
             # all data length covered
