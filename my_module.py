@@ -158,13 +158,23 @@ def sync_marks(sync_seq, the_marks, t_win ):
     grouped_mark_idx = [ np.logical_and( the_marks > ii-pre_win, the_marks < ii+post_win).nonzero() for ii in sync_seq ]
     grouped_mark = np.hstack([ the_marks[this_mark_idx] - ii + pre_win for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
     mark_dist = np.hstack([ np.abs(the_marks[this_mark_idx] - ii) for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
-    grouped_mark_idx = np.hstack(grouped_mark_idx)
+    grouped_mark_idx = np.hstack(grouped_mark_idx).flatten()
     
     aux_idx = np.argsort(grouped_mark_idx)
     grouped_mark_idx = grouped_mark_idx[aux_idx]
     mark_dist = mark_dist[aux_idx]
     grouped_mark = grouped_mark[aux_idx]
     
+    for ii in np.array(np.diff(grouped_mark_idx) == 0).nonzero():
+    
+        aux_idx = (grouped_mark_idx == grouped_mark_idx[ii]).nonzero()
+        
+        aux_idx2 = np.argsort(mark_dist[aux_idx])
+        
+        grouped_mark[ aux_idx[aux_idx2[1:]]] = np.nan
+        
+    grouped_mark = grouped_mark[np.bitwise_not(np.isnan(grouped_mark))]
+        
     
     return(synced_marks)
 
