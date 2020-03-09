@@ -15,6 +15,7 @@ from glob import glob
 import wfdb as wf
 from scipy import signal as sig
 import scipy.io as sio
+from sklearn import cluster
 
 import argparse as ap
 import re
@@ -26,7 +27,7 @@ from importlib import reload
 
 from qs_filter_design import qs_filter_design
 
-from my_module import my_int, my_ceil, my_find_extrema, plot_ecg_mosaic
+from my_module import my_int, my_ceil, my_find_extrema, sync_marks, plot_ecg_mosaic
 
 
 def get_records( db_path, db_name ):
@@ -213,7 +214,7 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         this_distance = my_int(0.1*ds_config['target_fs'])
         # rel_extrema = my_find_extrema( np.squeeze(wt_data[:,:]), this_distance = this_distance )
         # rel_extrema = my_find_extrema( np.squeeze(wt_data) )
-        zero_crossings, extrema = [ my_find_extrema( np.squeeze(wt_data[:,:, jj]) ) for jj in range(wt_data.shape[2])]
+        all_extrema = [ my_find_extrema( np.squeeze(wt_data[:,:, jj]) ) for jj in range(wt_data.shape[2])]
 
         # half_distance = this_distance // 2
         # rel_extrema_r = [ np.array([ kk-half_distance+np.argmax( np.abs(data[ np.max([0, kk-half_distance]):np.min([data.shape[0],kk+half_distance]), jj ]) ) for kk in rel_extrema[jj] ]) for jj in range(ecg_header['n_sig']) ]
@@ -226,6 +227,7 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         
         pre_win = my_int( ecg_header['fs'] * 0.3 )
         post_win = my_int( ecg_header['fs'] * 0.5 )
+
         
         target_lead_names =  ['II', 'V2', 'V5']
         
@@ -236,15 +238,34 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
         this_data = np.hstack( [this_data, wt_data[:,target_lead_idx, 0]] )
         this_data = np.hstack( [this_data, wt_data[:,target_lead_idx, 1]] )
         
-        for jj in range(wt_data.shape[2]):
-            this_marks = [ zero_crossings[jj][ii] for ii in target_lead_idx ] * 3
-            this_fig = plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = (pre_win, post_win), row_cols =  (3, len(target_lead_idx)), marks = this_marks)
-            this_fig.suptitle( '{:s} ZC escala {:d}'.format(this_rec_name,  wt_scales[jj] ))
+        # for jj in range(wt_data.shape[2]):
+        #     this_marks = [ all_extrema[jj][0][ii] for ii in target_lead_idx ] * 3
+        #     this_fig = plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = (pre_win, post_win), row_cols =  (3, len(target_lead_idx)), marks = this_marks)
+        #     this_fig.suptitle( '{:s} ZC escala {:d}'.format(this_rec_name,  wt_scales[jj] ))
 
+        # for jj in range(wt_data.shape[2]):
+        #     this_marks = [ all_extrema[jj][1][ii] for ii in target_lead_idx ] * 3
+        #     this_fig = plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = (pre_win, post_win), row_cols =  (3, len(target_lead_idx)), marks = this_marks)
+        #     this_fig.suptitle( '{:s} extremos escala {:d}'.format(this_rec_name,  wt_scales[jj] ))
+
+
+
+        k_means = cluster.KMeans(n_clusters=8)
+        
+        # por cada escala
         for jj in range(wt_data.shape[2]):
-            this_marks = [ extrema[jj][ii] for ii in target_lead_idx ] * 3
-            this_fig = plot_ecg_mosaic(this_data, qrs_locations = qrs_locs, t_win = (pre_win, post_win), row_cols =  (3, len(target_lead_idx)), marks = this_marks)
-            this_fig.suptitle( '{:s} extremos escala {:d}'.format(this_rec_name,  wt_scales[jj] ))
+            # this_zc = [ all_extrema[jj][0][ii] for ii in range(wt_data.shape[1]) ]
+            # this_ext = [ all_extrema[jj][1][ii] for ii in range(wt_data.shape[1]) ]
+            
+            for ii in target_lead_idx:
+                
+                this_zc = all_extrema[jj][0][ii] 
+                this_ext = all_extrema[jj][1][ii]
+                
+                sync_zc = sync_marks(qrs_locs, this_zc, t_win = (pre_win, post_win))
+                sync_ext = sync_marks(qrs_locs, this_ext, t_win = (pre_win, post_win))
+                
+                k_means.fit(this_ext)
 
         
         # construct a dataframe with target data
