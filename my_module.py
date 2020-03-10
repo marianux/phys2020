@@ -155,7 +155,7 @@ def sync_marks(sync_seq, the_marks, t_win ):
         post_win = 1000
         
     the_marks = np.array(the_marks)
-    grouped_mark_idx = [ np.logical_and( the_marks > ii-pre_win, the_marks < ii+post_win).nonzero() for ii in sync_seq ]
+    grouped_mark_idx = [ np.logical_and( the_marks > (ii-pre_win), the_marks < (ii+post_win)).nonzero()[0] for ii in sync_seq ]
     grouped_mark = np.hstack([ the_marks[this_mark_idx] - ii + pre_win for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
     mark_dist = np.hstack([ np.abs(the_marks[this_mark_idx] - ii) for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
     grouped_mark_idx = np.hstack(grouped_mark_idx).flatten()
@@ -165,18 +165,19 @@ def sync_marks(sync_seq, the_marks, t_win ):
     mark_dist = mark_dist[aux_idx]
     grouped_mark = grouped_mark[aux_idx]
     
-    for ii in np.array(np.diff(grouped_mark_idx) == 0).nonzero():
+    for ii in (np.diff(grouped_mark_idx) == 0).nonzero()[0]:
     
-        aux_idx = (grouped_mark_idx == grouped_mark_idx[ii]).nonzero()
+        aux_idx = (grouped_mark_idx == grouped_mark_idx[ii]).nonzero()[0]
         
         aux_idx2 = np.argsort(mark_dist[aux_idx])
         
-        grouped_mark[ aux_idx[aux_idx2[1:]]] = np.nan
+        grouped_mark[ aux_idx[aux_idx2[1:]]] = -1
+        grouped_mark_idx[ aux_idx[aux_idx2[1:]]] = -1
         
-    grouped_mark = grouped_mark[np.bitwise_not(np.isnan(grouped_mark))]
-        
+    grouped_mark = grouped_mark[grouped_mark != -1]
+    grouped_mark_idx = grouped_mark_idx[grouped_mark_idx != -1]
     
-    return(synced_marks)
+    return(grouped_mark, the_marks[grouped_mark_idx])
 
 
 def plot_ecg_mosaic( data,  qrs_locations = None, target_lead_names = None, ecg_header = None,  t_win = None, row_cols = None, marks = None):

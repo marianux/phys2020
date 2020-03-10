@@ -262,8 +262,11 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
                 this_zc = all_extrema[jj][0][ii] 
                 this_ext = all_extrema[jj][1][ii]
                 
-                sync_zc = sync_marks(qrs_locs, this_zc, t_win = (pre_win, post_win))
-                sync_ext = sync_marks(qrs_locs, this_ext, t_win = (pre_win, post_win))
+                sync_zc, sync_zc_idx = sync_marks(qrs_locs, this_zc, t_win = (pre_win, post_win))
+                sync_ext, sync_ext_idx = sync_marks(qrs_locs, this_ext, t_win = (pre_win, post_win))
+                
+                data_zc = np.vstack([ sync_zc_idx, data[sync_zc_idx, ii] ]).transpose()
+                data_ext = np.vstack([ sync_ext_idx, wt_data[sync_ext_idx, ii, jj] ]).transpose()
                 
                 k_means.fit(this_ext)
 
