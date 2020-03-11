@@ -144,6 +144,22 @@ def my_find_extrema( x, this_distance = None ):
     return(my_zc, my_ex)
 
 
+def sync_sig(sig, sync_seq, t_win ):
+
+    synced_marks = np.array([])
+    
+    if  np.all([isinstance(ii, Number) for ii in t_win]):
+        pre_win, post_win = t_win
+    else:
+        pre_win = 1000
+        post_win = 1000
+        
+    the_marks = np.arange(sig.shape[0])
+    sync_sig = np.stack([ sig[np.logical_and( the_marks > (ii-pre_win), the_marks < (ii+post_win)), :]  for ii in sync_seq ], axis = 2)
+    
+    return(sync_sig)
+
+
 def sync_marks(sync_seq, the_marks, t_win ):
     
     synced_marks = np.array([])
@@ -156,7 +172,7 @@ def sync_marks(sync_seq, the_marks, t_win ):
         
     the_marks = np.array(the_marks)
     grouped_mark_idx = [ np.logical_and( the_marks > (ii-pre_win), the_marks < (ii+post_win)).nonzero()[0] for ii in sync_seq ]
-    grouped_mark = np.hstack([ the_marks[this_mark_idx] - ii + pre_win for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
+    grouped_mark = np.hstack([ the_marks[this_mark_idx] - ii + pre_win - 1 for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
     mark_dist = np.hstack([ np.abs(the_marks[this_mark_idx] - ii) for (ii,this_mark_idx) in zip(sync_seq, grouped_mark_idx) ])
     grouped_mark_idx = np.hstack(grouped_mark_idx).flatten()
     

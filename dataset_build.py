@@ -15,7 +15,7 @@ from glob import glob
 import wfdb as wf
 from scipy import signal as sig
 import scipy.io as sio
-from sklearn import cluster
+from sklearn import cluster, preprocessing, mixture
 
 import argparse as ap
 import re
@@ -27,7 +27,7 @@ from importlib import reload
 
 from qs_filter_design import qs_filter_design
 
-from my_module import my_int, my_ceil, my_find_extrema, sync_marks, plot_ecg_mosaic
+from my_module import my_int, my_ceil, my_find_extrema, sync_marks, sync_sig, plot_ecg_mosaic
 
 
 def get_records( db_path, db_name ):
@@ -250,14 +250,25 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
 
 
 
-        k_means = cluster.KMeans(n_clusters=8)
-        
+
         # por cada escala
         for jj in range(wt_data.shape[2]):
             # this_zc = [ all_extrema[jj][0][ii] for ii in range(wt_data.shape[1]) ]
             # this_ext = [ all_extrema[jj][1][ii] for ii in range(wt_data.shape[1]) ]
+
+            this_wdata = sync_sig(np.squeeze(wt_data[:,:,jj]), qrs_locs, t_win = (pre_win, post_win))
             
-            for ii in target_lead_idx:
+            this_wdata_m = np.mean(this_wdata, axis = 2)
+            
+            all_data = []
+            all_data_p = []
+
+            # construyo la transformacion del espacio mediante la longitud de la curva media.
+            clt = np.hstack([0.0, np.cumsum(np.abs(np.diff(this_wdata_m[:, ii])))])
+
+            
+            for ii in range(data.shape[1]):
+            # for ii in target_lead_idx:
                 
                 this_zc = all_extrema[jj][0][ii] 
                 this_ext = all_extrema[jj][1][ii]
@@ -265,10 +276,57 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
                 sync_zc, sync_zc_idx = sync_marks(qrs_locs, this_zc, t_win = (pre_win, post_win))
                 sync_ext, sync_ext_idx = sync_marks(qrs_locs, this_ext, t_win = (pre_win, post_win))
                 
-                data_zc = np.vstack([ sync_zc_idx, data[sync_zc_idx, ii] ]).transpose()
-                data_ext = np.vstack([ sync_ext_idx, wt_data[sync_ext_idx, ii, jj] ]).transpose()
+
+                the_data = np.vstack([np.vstack([ sync_zc, wt_data[sync_zc_idx, ii, jj] ]).transpose(), 
+                                        np.vstack([ sync_ext, wt_data[sync_ext_idx, ii, jj] ]).transpose()])
                 
-                k_means.fit(this_ext)
+                # project data to the mean waveform
+                data_zc_p = np.vstack([ clt[sync_zc], wt_data[sync_zc_idx, ii, jj] ]).transpose()
+                data_ext_p = np.vstack([ clt[sync_ext], wt_data[sync_ext_idx, ii, jj] ]).transpose()
+                
+                the_data_p = np.vstack([data_zc_p, data_ext_p])
+
+                if len(all_data) == 0 :
+                    all_data = the_data
+                else:
+                    all_data = np.vstack([all_data, the_data])
+                    
+                if len(all_data_p) == 0 :
+                    all_data_p = the_data_p
+                else:
+                    all_data_p = np.vstack([all_data_p, the_data_p])
+                
+
+
+            km_data = cluster.KMeans(n_clusters=14 ).fit(all_data_p)
+            y_pred = km_data.labels_
+
+            plt.figure(1); plt.clf(); plt.scatter(all_data[:,0], all_data[:,1], c= y_pred); 
+
+            this_ax = plt.gca()
+            the_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            labels = np.unique(y_pred)
+            
+            for kk in range(labels.shape[0]):
+                this_mean = np.mean( all_data[ y_pred == labels[kk] ], axis = 0 )
+                this_ax.text(this_mean[0], this_mean[1], '{:d}'.format(labels[kk]), 
+                        bbox={'facecolor': the_colors[kk%len(the_colors)], 'alpha': 0.5, 'pad': 6})
+                
+            plt.pause(2)
+
+    
+            # km_data = mixture.GaussianMixture( n_components=14, covariance_type='full').fit(the_data_p)
+            # y_pred = km_data.predict(the_data_p)
+            
+            # plt.figure(1); plt.clf(); plt.scatter(the_data[:,0], the_data[:,1], c= y_pred); 
+            
+            # this_ax = plt.gca()
+            # the_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+            # for kk in range(km_data.means_.shape[0]):
+            #     this_ax.text(km_data.means_[kk,0], km_data.means_[kk,1], '{:d}'.format(kk), 
+            #             bbox={'facecolor': the_colors[kk], 'alpha': 0.5, 'pad': 6})
+                
+            # plt.pause(2)
 
         
         # construct a dataframe with target data
