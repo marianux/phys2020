@@ -16,6 +16,11 @@ import wfdb as wf
 from scipy import signal as sig
 import scipy.io as sio
 from sklearn import cluster, preprocessing, mixture
+from sklearn.decomposition import PCA
+from sklearn.covariance import empirical_covariance
+
+from numpy.linalg import eig
+
 
 import argparse as ap
 import re
@@ -262,9 +267,22 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
             
             all_data = []
             all_data_p = []
+            
+            
+            wdata_qrs = np.vstack([this_wdata[ pre_win+np.arange(start=-pre_win//4, stop=+pre_win//2, dtype='int' ), :,ii ] for ii in range(this_wdata.shape[2])])
+            
+            this_cov = empirical_covariance(wdata_qrs)
+            
+            eigw, eigv = eig(this_cov)
+            aux_idx = np.argsort(eigw)[::-1]
+            
+            eigw = eigw[aux_idx]
+            eigv = eigv[aux_idx,:]
+            
+            this_wdata_pca = np.dot(this_wdata_m, eigv[:,0:3])
 
             # construyo la transformacion del espacio mediante la longitud de la curva media.
-            clt = np.hstack([0.0, np.cumsum(np.abs(np.diff(this_wdata_m[:, ii])))])
+            clt = np.hstack([0.0, np.cumsum( np.sqrt(np.sum(np.diff(this_wdata_pca,axis=0)**2, axis= 1)))])
 
             
             for ii in range(data.shape[1]):
@@ -296,8 +314,7 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
                 else:
                     all_data_p = np.vstack([all_data_p, the_data_p])
                 
-
-
+                
             km_data = cluster.KMeans(n_clusters=14 ).fit(all_data_p)
             y_pred = km_data.labels_
 
