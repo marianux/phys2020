@@ -15,9 +15,10 @@ from glob import glob
 import wfdb as wf
 from scipy import signal as sig
 import scipy.io as sio
-from sklearn import cluster, preprocessing, mixture
+from sklearn import cluster, preprocessing
 from sklearn.decomposition import PCA
 from sklearn.covariance import empirical_covariance
+from sklearn.mixture import GaussianMixture
 
 from numpy.linalg import eig
 
@@ -265,9 +266,6 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
             
             this_wdata_m = np.mean(this_wdata, axis = 2)
             
-            all_data = []
-            all_data_p = []
-            
             
             wdata_qrs = np.vstack([this_wdata[ pre_win+np.arange(start=-pre_win//4, stop=+pre_win//2, dtype='int' ), :,ii ] for ii in range(this_wdata.shape[2])])
             
@@ -281,9 +279,13 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
             
             this_wdata_pca = np.dot(this_wdata_m, eigv[:,0:3])
 
-            # construyo la transformacion del espacio mediante la longitud de la curva media.
+            # construyo la transformacion del espacio mediante la longitud de la curva media para facilitar el clustering
             clt = np.hstack([0.0, np.cumsum( np.sqrt(np.sum(np.diff(this_wdata_pca,axis=0)**2, axis= 1)))])
 
+            last_label = 0
+            all_labels = []
+            all_data = []
+            all_data_p = []
             
             for ii in range(data.shape[1]):
             # for ii in target_lead_idx:
@@ -304,6 +306,16 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
                 
                 the_data_p = np.vstack([data_zc_p, data_ext_p])
 
+                km_data = cluster.KMeans(n_clusters=14 ).fit(the_data_p)
+                y_pred = km_data.labels_ + last_label
+                
+                last_label += np.max(np.unique(y_pred))
+
+                if len(all_labels) == 0 :
+                    all_labels = y_pred
+                else:
+                    all_labels = np.hstack([all_labels, y_pred])
+                    
                 if len(all_data) == 0 :
                     all_data = the_data
                 else:
@@ -314,36 +326,64 @@ def make_dataset(records, data_path, ds_config, leads_x_rec = [], data_aumentati
                 else:
                     all_data_p = np.vstack([all_data_p, the_data_p])
                 
-                
-            km_data = cluster.KMeans(n_clusters=14 ).fit(all_data_p)
-            y_pred = km_data.labels_
 
-            plt.figure(1); plt.clf(); plt.scatter(all_data[:,0], all_data[:,1], c= y_pred); 
+                km_data = cluster.KMeans(n_clusters=16 ).fit(the_data_p)
+                y_pred = km_data.labels_ + last_label
 
-            this_ax = plt.gca()
-            the_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-            labels = np.unique(y_pred)
-            
-            for kk in range(labels.shape[0]):
-                this_mean = np.mean( all_data[ y_pred == labels[kk] ], axis = 0 )
-                this_ax.text(this_mean[0], this_mean[1], '{:d}'.format(labels[kk]), 
-                        bbox={'facecolor': the_colors[kk%len(the_colors)], 'alpha': 0.5, 'pad': 6})
-                
-            plt.pause(2)
 
-    
-            # km_data = mixture.GaussianMixture( n_components=14, covariance_type='full').fit(the_data_p)
-            # y_pred = km_data.predict(the_data_p)
+            labels = np.unique(all_labels)
             
-            # plt.figure(1); plt.clf(); plt.scatter(the_data[:,0], the_data[:,1], c= y_pred); 
+            clust_mean = np.vstack([ np.median( all_data[ all_labels == labels[kk] ], axis = 0 ) for kk in range(labels.shape[0]) ])
             
-            # this_ax = plt.gca()
-            # the_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-            # for kk in range(km_data.means_.shape[0]):
-            #     this_ax.text(km_data.means_[kk,0], km_data.means_[kk,1], '{:d}'.format(kk), 
-            #             bbox={'facecolor': the_colors[kk], 'alpha': 0.5, 'pad': 6})
-                
-            # plt.pause(2)
+            # sort clusters in time
+            aux_idx = np.argsort(clust_mean[:,0])
+
+            clust_mean = clust_mean[aux_idx, :]
+            
+            # QRS complex zone
+            aux_idx = np.bitwise_and( clust_mean[:,0] > pre_win-my_int( ecg_header['fs'] * 0.1 ), clust_mean[:,0] < pre_win+my_int( ecg_header['fs'] * 0.1 ) ).nonzero()[0]
+            
+            aux_idx2 = np.argsort( np.abs(clust_mean[aux_idx,1]) )
+            
+
+
+        # debug clusters
+        plt.figure(1)
+        plt.clf()
+        plt.plot(this_wdata_m)
+        plt.scatter(all_data[:,0], all_data[:,1], c= all_labels)
+
+        this_ax = plt.gca()
+        the_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        labels = np.unique(all_labels)
+        
+        for kk in range(labels.shape[0]):
+            this_mean = np.median( all_data[ all_labels == labels[kk] ], axis = 0 )
+            this_ax.text(this_mean[0], this_mean[1], '{:d}'.format(all_labels[kk]), 
+                    bbox={'facecolor': the_colors[kk%len(the_colors)], 'alpha': 0.5, 'pad': 6})
+            
+        plt.pause(2)
+
+
+        plt.figure(1)
+        plt.clf()
+        plt.plot(this_wdata_m)
+
+        this_ax = plt.gca()
+        the_colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        labels = np.unique(all_labels)
+        
+        for kk in range(labels.shape[0]):
+            # this_ax.text(clust_mean[kk,0], clust_mean[kk,1], '{:d}'.format(kk), 
+            #         bbox={'facecolor': the_colors[kk%len(the_colors)], 'alpha': 0.5, 'pad': 6})
+            
+            this_ax.annotate('{:d}'.format(kk), xy=(clust_mean[kk,0], clust_mean[kk,1]),  xycoords='data',
+                xytext=(clust_mean[kk,0]+ 10, clust_mean[kk,1] + 0.3), textcoords='data',
+                arrowprops=dict(facecolor='black'),
+                horizontalalignment='right', verticalalignment='top',
+                )
+            
+        plt.pause(2)
 
         
         # construct a dataframe with target data
